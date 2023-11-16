@@ -126,7 +126,7 @@ def generate_data(model_name, data_path, save_path):
 
     if 't5' in model_name:
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
         token_passage = 5454
         token_A = 71
         token_B = 272
