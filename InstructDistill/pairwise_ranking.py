@@ -44,7 +44,7 @@ def eval_prp(model_name):
 
     if 't5' in model_name:
         tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.float16)
+        model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
         token_passage = 5454
         token_A = 71
         token_B = 272
@@ -191,7 +191,7 @@ def generate_data(model_name, data_path, save_path):
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='google/flan-t5-xl')
-    parser.add_argument('--eval', type=bool, default=True)
+    parser.add_argument('--eval', type=bool, default=False)
     parser.add_argument('--generate', type=bool, default=True)
     parser.add_argument('--data', type=str, default='data/marco-train-10k.jsonl')
     parser.add_argument('--save_path', type=str, default='out/rpr-flan-t5-xl.json')
