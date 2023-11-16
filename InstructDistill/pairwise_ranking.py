@@ -141,6 +141,9 @@ def generate_data(model_name, data_path, save_path):
         token_B = 350
         PROMPT = GPT_PRP_PROMPT
 
+    model = model.cuda()
+    model.eval()
+
     rank_results = [json.loads(line) for line in open(data_path)][:10000]
     saved = []
     for item in tqdm(rank_results):
