@@ -144,7 +144,7 @@ def generate_data(model_name, data_path, save_path):
     model = model.cuda()
     model.eval()
 
-    rank_results = [json.loads(line) for line in open(data_path)][:10000]
+    rank_results = [json.loads(line) for line in open(data_path)]
     saved = []
     for item in tqdm(rank_results):
         q = item['query']
