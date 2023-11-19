@@ -10,16 +10,13 @@ except:
 import json
 from torch.utils.data import Dataset
 from accelerate import Accelerator
-from transformers import AutoTokenizer, AdamW, AutoModelForSeq2SeqLM, AutoConfig, AutoModelForCausalLM
+from transformers import AutoTokenizer, AdamW, AutoModelForSeq2SeqLM, AutoModelForCausalLM, PreTrainedTokenizer
 import torch
 import torch.distributed as dist
 from torch.utils.data import DistributedSampler
 from tqdm import tqdm
 from rank_loss import RankLoss
 import argparse
-import numpy as np
-import os
-
 
 class RerankData(Dataset):
     def __init__(self, data, tokenizer, psg_num=20, label=True):
@@ -152,15 +149,15 @@ def train(args):
 
     # Load model and tokenizer
     if 't5' in model_name:  # flan-t5
-        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+        tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
         model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
-        token_Yes = 2163
     else:  # llama
-        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, padding_side="left", model_max_length=4096)
+        tokenizer: PreTrainedTokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, padding_side="left", model_max_length=4096)
         tokenizer.pad_token_id = 0
         model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
-        token_Yes = 3869
 
+    token_yes = tokenizer.get_vocab()[args.token_yes]
+    print(f"Token yes: {args.token_yes} = {token_yes}")
     model.config.use_cache = False
     model.gradient_checkpointing_enable()
 
@@ -181,7 +178,7 @@ def train(args):
 
     loss_function = getattr(RankLoss, loss_type)
 
-    for epoch in range(3):
+    for epoch in range(args.epochs):
         accelerator.print(f'Training {save_path} {epoch}')
         accelerator.wait_for_everyone()
         model.train()
@@ -195,7 +192,7 @@ def train(args):
                 batch = {k: v.cuda() for k, v in batch.items()}
 
                 out = model(**batch)
-                logits = gather_tensors(out.logits[:, -1, token_Yes].contiguous())  # Gather all predictions across GPUs
+                logits = gather_tensors(out.logits[:, -1, token_yes].contiguous())  # Gather all predictions across GPUs
                 logits = logits.view(-1, psg_num)
 
                 y_true = torch.tensor([[1 / (i + 1) for i in range(logits.size(1))]] * logits.size(0)).cuda()
@@ -215,81 +212,6 @@ def train(args):
     return model, tokenizer
 
 
-def eval_on_benchmark(args, model, tokenizer):
-    os.environ['TOKENIZERS_PARALLELISM'] = 'false'
-    from bm25_retrieval import THE_RESULTS
-    from trec_eval import EvalFunction
-
-    # save_path = 'out/new-flan-t5-large-from-large/2.pt'
-    save_path = 'out/new-flan-t5-xl-from-xl/1/pytorch_model.bin'
-
-    model_name = 'models/flan-t5-xl'
-
-    print(save_path)
-    print(model_name)
-
-    if model is not None and tokenizer is not None:
-        pass
-    elif 't5' in model_name:  # flan-t5
-        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
-        model = AutoModelForSeq2SeqLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
-    else:  # llama
-        tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=False, padding_side="left",
-                                                  model_max_length=4096)
-        tokenizer.pad_token_id = 0
-        model = AutoModelForCausalLM.from_pretrained(model_name, torch_dtype=torch.bfloat16)
-
-    token_Yes = 2163 if 't5' in model_name else 3869
-
-    model.load_state_dict(torch.load(f'{save_path}'))
-    model = model.cuda()
-    model.eval()
-
-    # data_list = ['dl19', 'dl20', 'covid', 'nfc', 'touche', 'dbpedia', 'scifact', 'signal', 'news', 'robust04']
-    data_list = ['dl19', 'dl20']
-    for data_name in data_list:
-        print()
-        print('#' * 20)
-        print(save_path)
-        print(f'Now eval [{data_name}]')
-        print('#' * 20)
-
-        rank_results = json.load(open(THE_RESULTS[data_name]))
-        saved = []
-        for item in tqdm(rank_results):
-            q = item['query']
-            passages = [psg['content'] for i, psg in enumerate(item['hits'])][:100]
-            if len(passages) == 0:
-                saved.append('')
-                continue
-
-            i = 0
-            normalized_scores = []
-            while i < len(passages):
-                batch = passages[i: i + 10]
-                i += 10
-
-                features = tokenizer([RerankData.prompt(q, psg) for psg in batch], padding=True, truncation=True,
-                                     return_tensors="pt", max_length=1024)
-                if 't5' in model_name:
-                    features['decoder_input_ids'] = torch.zeros(len(batch), 1).long()
-
-                features = {k: v.cuda() for k, v in features.items()}
-                with torch.no_grad():
-                    scores = model(**features).logits[:, -1, token_Yes]
-                    normalized_scores.extend([float(score) for score in scores])
-
-            ranked = np.argsort(normalized_scores)[::-1]
-            response = ' > '.join([str(ss + 1) for ss in ranked])
-            saved.append(response)
-
-        rank_results = EvalFunction.receive_responses(rank_results, saved, cut_start=0, cut_end=100)
-        tmp_path = save_path.replace('/', '-')
-        tmp_path = 'tmp/' + tmp_path
-        EvalFunction.write_file(rank_results, tmp_path)
-        EvalFunction.main(data_name, tmp_path)
-
-
 def parse_args():
     parser = argparse.ArgumentParser()
     parser.add_argument('--model', type=str, default='google/flan-t5-xl')
@@ -297,8 +219,8 @@ def parse_args():
     parser.add_argument('--data', type=str, default='data/marco-train-10k.jsonl')
     parser.add_argument('--save_path', type=str, default='out/flan-t5-xl-id')
     parser.add_argument('--permutation', type=str, default='marco-train-10k-gpt3.5.json')
-    parser.add_argument('--do_train', type=bool, default=True)
-    parser.add_argument('--do_eval', type=bool, default=True)
+    parser.add_argument('--epochs', type=int, default=3)
+    parser.add_argument("--token_yes", type=str, default="tak")
     args = parser.parse_args()
 
     print('====Input Arguments====')
@@ -308,8 +230,4 @@ def parse_args():
 
 if __name__ == '__main__':
     args = parse_args()
-    model, tokenizer = None, None
-    if args.do_train:
-        model, tokenizer = train(args)
-    if args.de_eval:
-        eval_on_benchmark(args, model, tokenizer)
+    train(args)

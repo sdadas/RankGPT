@@ -9,7 +9,6 @@ import numpy as np
 import os
 import argparse
 import tempfile
-import copy
 
 
 class RerankData(Dataset):
@@ -90,7 +89,8 @@ def parse_args():
     parser.add_argument('--save_path', type=str, default='out/deberta-rank_net')
     parser.add_argument('--permutation', type=str, default='marco-train-10k-gpt3.5.json')
     parser.add_argument('--do_train', type=bool, default=True)
-    parser.add_argument('--do_eval', type=bool, default=True)
+    parser.add_argument('--do_eval', type=bool, default=False)
+    parser.add_argument('--epochs', type=int, default=3)
     args = parser.parse_args()
 
     print('====Input Arguments====')
@@ -129,8 +129,7 @@ def train(args):
     # Prepare loss function
     loss_function = getattr(RankLoss, loss_type)
 
-    # Train for 3 epoch
-    for epoch in range(3):
+    for epoch in range(args.epochs):
         accelerator.print(f'Training {save_path} {epoch}')
         accelerator.wait_for_everyone()
         model.train()
@@ -247,5 +246,5 @@ if __name__ == '__main__':
     model, tokenizer = None, None
     if args.do_train:
         model, tokenizer = train(args)
-    if args.de_eval:
+    if args.do_eval:
         eval_on_benchmark(args, model, tokenizer)
