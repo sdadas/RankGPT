@@ -208,7 +208,9 @@ def train(args):
             tk0.set_postfix(loss=sum(loss_report[-100:]) / len(loss_report[-100:]))
 
         accelerator.wait_for_everyone()
-        model.save_checkpoint(f'{save_path}/{epoch}')
+        save_dir = f'{save_path}/{epoch}'
+        model.save_checkpoint(save_dir)
+        tokenizer.save_pretrained(save_dir)
     return model, tokenizer
 
 

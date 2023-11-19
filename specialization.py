@@ -156,6 +156,7 @@ def train(args):
     unwrap_model = accelerator.unwrap_model(model)
     os.makedirs(save_path, exist_ok=True)
     unwrap_model.save_pretrained(save_path)
+    tokenizer.save_pretrained(save_path)
 
     return model, tokenizer
 
