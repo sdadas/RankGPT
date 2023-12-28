@@ -1,4 +1,6 @@
 import json
+
+from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import Dataset
 from accelerate import Accelerator
 from transformers import AutoModelForSequenceClassification, AutoConfig, AutoTokenizer, AdamW
@@ -91,6 +93,9 @@ def parse_args():
     parser.add_argument('--do_train', type=bool, default=True)
     parser.add_argument('--do_eval', type=bool, default=False)
     parser.add_argument('--epochs', type=int, default=3)
+    parser.add_argument('--batch_size', type=int, default=8)
+    parser.add_argument('--lr', type=float, default=5e-5)
+    parser.add_argument('--linear_decay', type=bool, default=False)
     args = parser.parse_args()
 
     print('====Input Arguments====')
@@ -105,7 +110,7 @@ def train(args):
     save_path = args.save_path
     permutation = args.permutation
 
-    accelerator = Accelerator(gradient_accumulation_steps=8)
+    accelerator = Accelerator(gradient_accumulation_steps=args.batch_size)
     neg_num = 19
 
     # Create cross encoder model
@@ -123,8 +128,10 @@ def train(args):
     # Prepare data loader
     data_loader = torch.utils.data.DataLoader(dataset, collate_fn=dataset.collate_fn,
                                               batch_size=1, shuffle=True, num_workers=0)
-    optimizer = AdamW(model.parameters(), 5e-5)
-    model, optimizer, data_loader = accelerator.prepare(model, optimizer, data_loader)
+    optimizer = AdamW(model.parameters(), args.lr)
+    iters = int((len(dataset) / args.batch_size) * args.epochs)
+    scheduler = LinearLR(optimizer, start_factor=1.0, end_factor=0.1 if args.linear_decay else 1.0, total_iters=iters)
+    model, optimizer, scheduler, data_loader = accelerator.prepare(model, optimizer, scheduler, data_loader)
 
     # Prepare loss function
     loss_function = getattr(RankLoss, loss_type)
@@ -149,7 +156,8 @@ def train(args):
                 optimizer.step()
                 optimizer.zero_grad()
                 loss_report.append(accelerator.gather(loss).mean().item())
-            tk0.set_postfix(loss=sum(loss_report) / len(loss_report))
+            scheduler.step()
+            tk0.set_postfix(loss=sum(loss_report) / len(loss_report), lr=scheduler.get_last_lr()[0])
         accelerator.wait_for_everyone()
 
     # Save model
