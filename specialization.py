@@ -1,4 +1,5 @@
 import json
+import random
 
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import Dataset
@@ -30,7 +31,7 @@ class RerankData(Dataset):
         query = item['query']
 
         if self.label:
-            pos = [str(item['positive_passages'][0]['text'])]
+            pos = [str(random.choice(item['positive_passages'])['text'])]
             pos_id = [psg['docid'] for psg in item['positive_passages']]
             neg = [str(psg['text']) for psg in item['retrieved_passages'] if psg['docid'] not in pos_id][:self.neg_num]
         else:
@@ -44,8 +45,7 @@ class RerankData(Dataset):
         query, passages = zip(*data)
         query = sum(query, [])
         passages = sum(passages, [])
-        features = self.tokenizer(query, passages, padding=True, truncation=True, return_tensors="pt",
-                                  max_length=500)
+        features = self.tokenizer(query, passages, padding=True, truncation=True, return_tensors="pt", max_length=512)
         return features
 
 
@@ -96,11 +96,18 @@ def parse_args():
     parser.add_argument('--batch_size', type=int, default=8)
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--linear_decay', type=bool, default=False)
+    parser.add_argument('--save_steps', type=int, default=-1)
     args = parser.parse_args()
 
     print('====Input Arguments====')
     print(json.dumps(vars(args), indent=2, sort_keys=False))
     return args
+
+
+def save_model(model, tokenizer, save_path: str):
+    os.makedirs(save_path, exist_ok=True)
+    model.save_pretrained(save_path)
+    tokenizer.save_pretrained(save_path)
 
 
 def train(args):
@@ -142,6 +149,7 @@ def train(args):
         model.train()
         tk0 = tqdm(data_loader, total=len(data_loader))
         loss_report = []
+        i = 0
         for batch in tk0:
             with accelerator.accumulate(model):
                 out = model(**batch)
@@ -157,15 +165,15 @@ def train(args):
                 optimizer.zero_grad()
                 loss_report.append(accelerator.gather(loss).mean().item())
             scheduler.step()
+            i += 1
+            if args.save_steps > 0 and (i % args.save_steps) == 0:
+                accelerator.print(f"saving model to checkpoint-{i}")
+                save_model(accelerator.unwrap_model(model), tokenizer, os.path.join(save_path, f"checkpoint-{i}"))
             tk0.set_postfix(loss=sum(loss_report) / len(loss_report), lr=scheduler.get_last_lr()[0])
         accelerator.wait_for_everyone()
 
     # Save model
-    unwrap_model = accelerator.unwrap_model(model)
-    os.makedirs(save_path, exist_ok=True)
-    unwrap_model.save_pretrained(save_path)
-    tokenizer.save_pretrained(save_path)
-
+    save_model(accelerator.unwrap_model(model), tokenizer, os.path.join(save_path, "checkpoint-final"))
     return model, tokenizer
 
 
