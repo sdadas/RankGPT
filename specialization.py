@@ -1,6 +1,8 @@
 import json
 import random
 
+import torch
+torch.backends.cuda.matmul.allow_tf32 = True
 from torch.optim.lr_scheduler import LinearLR
 from torch.utils.data import Dataset
 from accelerate import Accelerator
