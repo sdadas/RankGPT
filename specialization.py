@@ -15,10 +15,11 @@ import tempfile
 
 
 class RerankData(Dataset):
-    def __init__(self, data, tokenizer, neg_num=20, label=True):
+    def __init__(self, data, tokenizer, neg_num=20, label=True, max_length=512):
         self.data = data
         self.tokenizer = tokenizer
         self.neg_num = neg_num
+        self.max_length = max_length
         self.label = label
         if not label:
             self.neg_num += 1
@@ -45,7 +46,9 @@ class RerankData(Dataset):
         query, passages = zip(*data)
         query = sum(query, [])
         passages = sum(passages, [])
-        features = self.tokenizer(query, passages, padding=True, truncation=True, return_tensors="pt", max_length=512)
+        features = self.tokenizer(
+            query, passages, padding=True, truncation=True, return_tensors="pt", max_length=self.max_length
+        )
         return features
 
 
@@ -97,6 +100,7 @@ def parse_args():
     parser.add_argument('--lr', type=float, default=5e-5)
     parser.add_argument('--linear_decay', type=bool, default=False)
     parser.add_argument('--save_steps', type=int, default=-1)
+    parser.add_argument('--max_length', type=int, default=512)
     args = parser.parse_args()
 
     print('====Input Arguments====')
@@ -130,7 +134,7 @@ def train(args):
     data = [json.loads(line) for line in open(data_path)]
     response = json.load(open(permutation))
     data = receive_response(data, response)
-    dataset = RerankData(data, tokenizer, neg_num=neg_num, label=False)
+    dataset = RerankData(data, tokenizer, neg_num=neg_num, label=False, max_length=args.max_length)
 
     # Prepare data loader
     data_loader = torch.utils.data.DataLoader(dataset, collate_fn=dataset.collate_fn,
