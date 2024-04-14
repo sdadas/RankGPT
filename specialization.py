@@ -101,6 +101,7 @@ def parse_args():
     parser.add_argument('--linear_decay', type=bool, default=False)
     parser.add_argument('--save_steps', type=int, default=-1)
     parser.add_argument('--max_length', type=int, default=512)
+    parser.add_argument('--mixed_precision', type=str, default='bf16')
     args = parser.parse_args()
 
     print('====Input Arguments====')
@@ -121,13 +122,15 @@ def train(args):
     save_path = args.save_path
     permutation = args.permutation
 
-    accelerator = Accelerator(gradient_accumulation_steps=args.batch_size)
+    accelerator = Accelerator(gradient_accumulation_steps=args.batch_size, mixed_precision=args.mixed_precision)
     neg_num = 19
 
     # Create cross encoder model
     config = AutoConfig.from_pretrained(model_name)
     config.num_labels = 1
-    model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config)
+    precision_map = {"fp16": torch.float16, "bf16": torch.bfloat16, "no": torch.float32}
+    torch_dtype = precision_map[args.mixed_precision]
+    model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config, torch_dtype=torch_dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
 
     # Load data and permutation
