@@ -104,6 +104,7 @@ def parse_args():
     parser.add_argument('--save_steps', type=int, default=-1)
     parser.add_argument('--max_length', type=int, default=512)
     parser.add_argument('--mixed_precision', type=str, default='bf16')
+    parser.add_argument('--gradient_checkpointing', type=bool, default=False)
     args = parser.parse_args()
 
     print('====Input Arguments====')
@@ -134,6 +135,9 @@ def train(args):
     torch_dtype = precision_map[args.mixed_precision]
     model = AutoModelForSequenceClassification.from_pretrained(model_name, config=config, torch_dtype=torch_dtype)
     tokenizer = AutoTokenizer.from_pretrained(model_name, use_fast=True)
+
+    if args.gradient_checkpointing:
+        model.gradient_checkpointing_enable()
 
     # Load data and permutation
     data = [json.loads(line) for line in open(data_path)]
